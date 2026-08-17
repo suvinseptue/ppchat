@@ -1,0 +1,9 @@
+.venv/
+.DS_Store
+__pycache__/
+*.pyc
+out/
+tools/find_keys_macos
+*.db
+candidates.json
+keys.json
