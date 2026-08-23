@@ -1,11 +1,11 @@
 ---
 name: ppchat
-description: 解密并处理本机微信(macOS, WeChat 4.x)聊天记录：把某个群某天的消息汇总成结构化结果，并从中提取需求、关联截图。当用户要“汇总某个微信群某天的聊天”“收集群里的需求”“看看某群昨天聊了什么”时使用。
+description: 解密并处理本机微信(macOS 4.x / Windows 4.0)聊天记录：把某个群某天的消息汇总成结构化结果，并从中提取需求、关联截图。当用户要“汇总某个微信群某天的聊天”“收集群里的需求”“看看某群昨天聊了什么”时使用。
 ---
 
 # ppchat — 微信聊天记录处理
 
-本机微信 4.x（macOS）聊天记录的解密 + 汇总 + 需求提取工具。分层：采集(解密) → 存储(归一化 SQLite) → 通用 Access API → 应用层(汇总/需求，由 agent 推理)。
+本机微信 4.x（macOS）/ 4.0（Windows）聊天记录的解密 + 汇总 + 需求提取工具。分层：采集(解密) → 存储(归一化 SQLite) → 通用 Access API → 应用层(汇总/需求，由 agent 推理)。
 
 约定：所有命令用仓库内的虚拟环境 `./.venv/bin/python`。
 
@@ -23,6 +23,22 @@ sudo lldb -o "command script import tools/lldb_capture.py" -o "ppc_waitfor"
 ```
 
 细节见 `docs/superpowers/specs/2026-08-15-ppchat-wechat-skill-design.md`。
+
+## Windows（微信 4.0）
+
+Windows 微信 4.0（进程 `Weixin.exe`）与 macOS 4.x 共用同一套 SQLCipher 4 解密 / ingest / 存储。差异只在取密钥：以**管理员**运行、微信需**登录中**，扫进程内存即可，**无需**重签名 / 关 SIP / extract 副本。
+
+```bash
+# 管理员 PowerShell / cmd，Weixin.exe 已登录
+python tools/find_keys_windows.py
+# 写出 ~/.ppchat/candidates_windows.json
+python tools/build_keymap.py ~/.ppchat/candidates_windows.json
+# 或：PPCHAT_PROVIDER=wechat4-win python -c "from ppchat.provider import get_provider; print(get_provider().acquire_keys())"
+```
+
+之后日常 `ingest` / `export_day` 与 macOS 相同（`parse.ingest` / `app.export_day`）。数据目录默认 `%USERPROFILE%\Documents\xwechat_files`；也可在 `~/.ppchat/config.json` 写 `"db_root"` 覆盖。3.x（`WeChat.exe`）不支持。
+
+杀软 / EDR 可能拦截 `ReadProcessMemory`；若扫不到 `x'<96hex>'` 字面量（部分 4.1+），本期无断点兜底。
 
 ## 日常流程（无需 sudo）
 

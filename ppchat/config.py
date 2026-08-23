@@ -1,34 +1,132 @@
-"""Path discovery and constants for ppchat (WeChat 4.x on macOS)."""
+"""Path discovery and constants for ppchat (WeChat 4.x)."""
 from __future__ import annotations
 
 import glob
+import json
+import os
+import sys
 from pathlib import Path
 
-WECHAT_APP = Path("/Applications/WeChat.app")
-WECHAT_BIN = WECHAT_APP / "Contents/MacOS/WeChat"
-TENCENT_TEAM_ID = "5A4RE8SF68"
-
-CONTAINER = Path.home() / (
-    "Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files"
-)
-
-# ppchat working dir (key cache, normalized store)
+# ppchat working dir (key cache, normalized store) — platform-independent
 PPCHAT_HOME = Path.home() / ".ppchat"
 KEYS_JSON = PPCHAT_HOME / "keys.json"
 STORE_DB = PPCHAT_HOME / "ppchat.db"
+CANDIDATES_WINDOWS_JSON = PPCHAT_HOME / "candidates_windows.json"
 
 # generated application artifacts (bundles, summaries, requirements)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "out"
 
-# Temporary ad-hoc copy used only for key capture. Never sign WECHAT_APP.
-EXTRACT_ROOT = PPCHAT_HOME / "extract"
-EXTRACT_APP = EXTRACT_ROOT / "WeChat.app"
-EXTRACT_BIN = EXTRACT_APP / "Contents/MacOS/WeChat"
+
+def _macos_profile() -> dict:
+    wechat_app = Path("/Applications/WeChat.app")
+    extract_root = PPCHAT_HOME / "extract"
+    extract_app = extract_root / "WeChat.app"
+    return {
+        "WECHAT_APP": wechat_app,
+        "WECHAT_BIN": wechat_app / "Contents/MacOS/WeChat",
+        "TENCENT_TEAM_ID": "5A4RE8SF68",
+        "CONTAINER": Path.home()
+        / "Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files",
+        "EXTRACT_ROOT": extract_root,
+        "EXTRACT_APP": extract_app,
+        "EXTRACT_BIN": extract_app / "Contents/MacOS/WeChat",
+    }
+
+
+def _read_db_root_from_config() -> Path | None:
+    cfg_path = PPCHAT_HOME / "config.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        data = json.loads(cfg_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    raw = data.get("db_root") if isinstance(data, dict) else None
+    if not raw:
+        return None
+    return Path(str(raw)).expanduser()
+
+
+def _read_filesave_path_from_registry() -> Path | None:
+    # REAL-MACHINE-VERIFY: HKCU\Software\Tencent\WeChat FileSavePath (and any
+    # 4.0-specific key) — name/location may differ on WeChat 4.0 vs 3.x.
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Tencent\WeChat")
+    except OSError:
+        return None
+    try:
+        val, _ = winreg.QueryValueEx(key, "FileSavePath")
+    except OSError:
+        return None
+    finally:
+        winreg.CloseKey(key)
+    if not val:
+        return None
+    return Path(str(val))
+
+
+def _normalize_windows_container(path: Path) -> Path:
+    # REAL-MACHINE-VERIFY: FileSavePath may already be xwechat_files, or its parent.
+    if path.name.lower() == "xwechat_files":
+        return path
+    return path / "xwechat_files"
+
+
+def _default_windows_xwechat_files() -> Path:
+    root = os.environ.get("USERPROFILE")
+    base = Path(root) if root else Path.home()
+    return base / "Documents" / "xwechat_files"
+
+
+def _discover_windows_db_root() -> Path:
+    """Resolve CONTAINER: config.json db_root → registry → Documents\\xwechat_files."""
+    explicit = _read_db_root_from_config()
+    if explicit:
+        return explicit
+    reg = _read_filesave_path_from_registry()
+    if reg:
+        return _normalize_windows_container(reg)
+    return _default_windows_xwechat_files()
+
+
+def _windows_profile() -> dict:
+    return {
+        "CONTAINER": _discover_windows_db_root(),
+        "WECHAT_APP": None,
+        "WECHAT_BIN": None,
+        "TENCENT_TEAM_ID": None,
+        "EXTRACT_ROOT": None,
+        "EXTRACT_APP": None,
+        "EXTRACT_BIN": None,
+    }
+
+
+def _select_profile() -> dict:
+    if sys.platform == "darwin":
+        return _macos_profile()
+    if sys.platform.startswith("win"):
+        return _windows_profile()
+    return _macos_profile()
+
+
+_profile = _select_profile()
+WECHAT_APP = _profile.get("WECHAT_APP")
+WECHAT_BIN = _profile.get("WECHAT_BIN")
+TENCENT_TEAM_ID = _profile.get("TENCENT_TEAM_ID")
+CONTAINER = _profile["CONTAINER"]
+EXTRACT_ROOT = _profile.get("EXTRACT_ROOT")
+EXTRACT_APP = _profile.get("EXTRACT_APP")
+EXTRACT_BIN = _profile.get("EXTRACT_BIN")
 
 
 def account_dirs() -> list[Path]:
     """Return per-account data dirs (dirs that contain a db_storage folder)."""
+    # REAL-MACHINE-VERIFY: Windows 4.0 is CONTAINER/<account>/db_storage (same as mac).
     out = []
     if not CONTAINER.exists():
         return out
@@ -44,6 +142,7 @@ def default_account_dir() -> Path:
         raise FileNotFoundError(f"No WeChat account dir with db_storage under {CONTAINER}")
     # pick the one whose message db was modified most recently
     def score(d: Path) -> float:
+        # REAL-MACHINE-VERIFY: Windows 4.0 also uses db_storage/message/message_0.db
         msg = d / "db_storage" / "message" / "message_0.db"
         return msg.stat().st_mtime if msg.exists() else 0.0
     return max(dirs, key=score)
