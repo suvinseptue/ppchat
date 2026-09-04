@@ -74,6 +74,38 @@ python tools/build_keymap.py ~/.ppchat/candidates_windows.json
 
 参考产物：`out/富德系统支持/2026-08-17/`。一次性生成脚本示例：`tools/produce_20260817.py`。
 
+### 4. 事件分析位点（跨对话续跑）
+
+位点按「群 + 种类」记在 `~/.ppchat/ppchat.db` 的 `analysis_cursors`。种类名由你（agent）对照已有列表识别，代码不对词、没有别名表。
+
+```bash
+./.venv/bin/python -c "from ppchat import app; print(app.list_cursors('富德系统支持'))"
+./.venv/bin/python -c "from ppchat import app; print(app.get_cursor('富德系统支持','需求分析'))"
+./.venv/bin/python -c "from ppchat import app; b=app.export_after('富德系统支持', after_message_id=123); print(b['_bundle_dir'], b['message_count'])"
+./.venv/bin/python -c "from ppchat import app; print(app.save_cursor('富德系统支持','需求分析', 456, kind_label='需求统计'))"
+```
+
+编排：
+
+1. `parse.ingest` 目标群（与现在相同）。
+2. 从用户话里解析群；对不上或多个匹配则先问，不写位点。
+3. `list_cursors(group)`，判断此次分析对应哪个已有 `kind`，或应新开。
+   - 对不上 / 多个都像：问用户。
+   - 续跑：用**已有行的** `kind` 调 `get_cursor`（不要因为用户说了近义词就另写一行）。
+   - 新开：用用户这句话里的说法当 `kind`。
+4. 无位点（`get_cursor` 为 `None`，含消息已删导致的失效）：问从哪天或哪条开始。不要 `export_after` 全量，也不要默认「今天」。
+5. 有位点：`export_after(group, after_message_id=cursor['last_message_id'])`。
+6. 用户指定了日期区间：`export_after(group, since=..., until=...)`（unix 秒；`until` 不含）。
+7. `message_count == 0`：告诉用户没有新消息，**不要** `save_cursor`。
+8. 读 bundle 做分析，按现有方式写产物（`save_requirements` / `save_summary`）。
+9. 用 bundle **最后一条**的 `id` 调 `save_cursor`。结束时用一句话说清：种类、推到哪条消息、时间。
+
+说法对照：
+
+- 「根据最近聊天做需求汇集」→ 有位点从其后开始；没有则先问起点。
+- 「从上一次需求分析之后再统计」→ 对照已有种类续跑，复用该行 `kind`。
+- 「从 8 月 20 日开始做事件复盘」→ 新种类 `事件复盘`，`since` 为那天 0 点。
+
 ## 本地 HTTP API（通用数据原语，只读，绑定 127.0.0.1）
 
 ```bash
@@ -85,5 +117,6 @@ python tools/build_keymap.py ~/.ppchat/candidates_windows.json
 
 ## 现状 / 未做
 
+- 分析位点已落地（`app.list_cursors` / `get_cursor` / `save_cursor` / `export_after`）。种类语义匹配由 agent 做，不在代码里。
 - 图片仅建了占位 `attachments` 行（`pending`），`.dat` 实体解密（`images.py`）**尚未实现**，故 `local_path=null`。
 - 语音转写、appmsg 细分、群内昵称解析：未做。

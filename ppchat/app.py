@@ -1,13 +1,25 @@
-"""Application layer (Approach A): assemble a group's day of messages into an
-analysis-ready bundle, and define/persist the two deliverables:
+"""Application layer (Approach A): assemble a group's messages into an
+analysis-ready bundle, persist summary/requirements, and remember how far
+each kind of analysis has read.
 
   - summary.json / summary.md   (daily summary: topics, participants, todos)
   - requirements.json           (needs extracted from the day, with linked images)
+  - analysis_cursors            (per group + kind watermark in ppchat.db)
 
-The *reasoning* (writing the summary/requirements) is done by the Cursor agent,
-which reads the exported bundle and calls save_summary()/save_requirements().
-This module owns data assembly + output contracts + file layout only; it has no
-LLM dependency and no business heuristics baked in.
+The *reasoning* (writing the summary/requirements, matching kind names) is
+done by the Cursor agent. This module owns data assembly + output contracts
++ cursor persistence; it has no LLM dependency and no kind-alias table.
+
+Cursors
+-------
+list_cursors(group=None) -> list[dict]
+get_cursor(group, kind) -> dict | None
+    None if missing, or if last_message_id was deleted / wrong chat.
+save_cursor(group, kind, last_message_id, kind_label=None) -> dict
+    ValueError if the message is missing or not in that group.
+export_after(group, after_message_id=None, since=None, until=None) -> dict
+    Requires after_message_id or since. after_message_id wins the lower bound
+    (sort_seq strictly greater). Writes out/<group>/since-<id|date>/messages.json.
 
 Output schemas
 --------------
