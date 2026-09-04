@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS attachments (
     status     TEXT,               -- 'pending' | 'extracted' | 'failed'
     error      TEXT
 );
+CREATE TABLE IF NOT EXISTS analysis_cursors (
+    chat_wxid       TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    kind_label      TEXT,
+    last_message_id INTEGER NOT NULL,
+    last_sort_seq   INTEGER,
+    last_ts         INTEGER,
+    updated_at      INTEGER,
+    PRIMARY KEY (chat_wxid, kind)
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS ix_msg_chat_seq ON messages(chat_id, sort_seq);
 CREATE INDEX IF NOT EXISTS ix_msg_chat_ts  ON messages(chat_id, ts);
@@ -62,6 +72,7 @@ def connect() -> sqlite3.Connection:
     con = sqlite3.connect(config.STORE_DB)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
+    init(con)
     return con
 
 

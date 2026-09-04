@@ -43,6 +43,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+import time
 from pathlib import Path
 
 from . import config, store
@@ -178,6 +179,100 @@ def save_requirements(group_name: str, date_str: str, reqs: dict) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     (d / "requirements.json").write_text(json.dumps(reqs, ensure_ascii=False, indent=2))
     return d / "requirements.json"
+
+
+def _cursor_row(row, name: str) -> dict:
+    return {
+        "chat_wxid": row["chat_wxid"],
+        "name": name,
+        "kind": row["kind"],
+        "kind_label": row["kind_label"],
+        "last_message_id": row["last_message_id"],
+        "last_sort_seq": row["last_sort_seq"],
+        "last_ts": row["last_ts"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def list_cursors(group: str | None = None) -> list[dict]:
+    con = store.connect()
+    try:
+        sql = (
+            "SELECT ac.chat_wxid, ac.kind, ac.kind_label, ac.last_message_id, "
+            "ac.last_sort_seq, ac.last_ts, ac.updated_at, ch.name "
+            "FROM analysis_cursors ac JOIN chats ch ON ch.wxid=ac.chat_wxid"
+        )
+        args: list = []
+        if group is not None:
+            wxid, _ = resolve_group(con, group)
+            sql += " WHERE ac.chat_wxid=?"
+            args.append(wxid)
+        sql += " ORDER BY ch.name, ac.kind"
+        return [_cursor_row(r, r["name"]) for r in con.execute(sql, args)]
+    finally:
+        con.close()
+
+
+def get_cursor(group: str, kind: str) -> dict | None:
+    con = store.connect()
+    try:
+        wxid, name = resolve_group(con, group)
+        row = con.execute(
+            "SELECT chat_wxid, kind, kind_label, last_message_id, "
+            "last_sort_seq, last_ts, updated_at "
+            "FROM analysis_cursors WHERE chat_wxid=? AND kind=?",
+            (wxid, kind),
+        ).fetchone()
+        if not row:
+            return None
+        ok = con.execute(
+            "SELECT m.id FROM messages m JOIN chats c ON c.id=m.chat_id "
+            "WHERE m.id=? AND c.wxid=?",
+            (row["last_message_id"], wxid),
+        ).fetchone()
+        if not ok:
+            return None
+        return _cursor_row(row, name)
+    finally:
+        con.close()
+
+
+def save_cursor(group: str, kind: str, last_message_id: int,
+                kind_label: str | None = None) -> dict:
+    con = store.connect()
+    try:
+        wxid, name = resolve_group(con, group)
+        msg = con.execute(
+            "SELECT m.id, m.sort_seq, m.ts, c.wxid FROM messages m "
+            "JOIN chats c ON c.id=m.chat_id WHERE m.id=?",
+            (last_message_id,),
+        ).fetchone()
+        if not msg:
+            raise ValueError(f"message {last_message_id} not found")
+        if msg["wxid"] != wxid:
+            raise ValueError(f"message {last_message_id} is not in chat {wxid}")
+        label = kind if kind_label is None else kind_label
+        now = int(time.time())
+        con.execute(
+            "INSERT INTO analysis_cursors"
+            "(chat_wxid,kind,kind_label,last_message_id,last_sort_seq,last_ts,updated_at)"
+            " VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(chat_wxid,kind) DO UPDATE SET "
+            "kind_label=excluded.kind_label,"
+            "last_message_id=excluded.last_message_id,"
+            "last_sort_seq=excluded.last_sort_seq,"
+            "last_ts=excluded.last_ts,"
+            "updated_at=excluded.updated_at",
+            (wxid, kind, label, last_message_id, msg["sort_seq"], msg["ts"], now),
+        )
+        con.commit()
+        return {
+            "chat_wxid": wxid, "name": name, "kind": kind, "kind_label": label,
+            "last_message_id": last_message_id, "last_sort_seq": msg["sort_seq"],
+            "last_ts": msg["ts"], "updated_at": now,
+        }
+    finally:
+        con.close()
 
 
 def render_summary_md(s: dict) -> str:
