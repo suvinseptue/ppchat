@@ -159,6 +159,68 @@ def export_day(group_query: str, date_str: str) -> dict:
         con.close()
 
 
+def export_after(group_query: str, after_message_id: int | None = None,
+                 since: int | None = None, until: int | None = None) -> dict:
+    if after_message_id is None and since is None:
+        raise ValueError("export_after requires after_message_id or since")
+    con = store.connect()
+    try:
+        wxid, name = resolve_group(con, group_query)
+        after_seq = None
+        since_used = since
+        if after_message_id is not None:
+            msg = con.execute(
+                "SELECT m.sort_seq, c.wxid FROM messages m "
+                "JOIN chats c ON c.id=m.chat_id WHERE m.id=?",
+                (after_message_id,),
+            ).fetchone()
+            if not msg or msg["wxid"] != wxid:
+                raise ValueError(f"message {after_message_id} not found in {wxid}")
+            after_seq = msg["sort_seq"]
+            since_used = None  # after_message_id wins the lower bound
+        rows = store.get_messages(
+            con, wxid, since=since_used, until=until,
+            after_sort_seq=after_seq, limit=100000,
+        )
+        messages = []
+        pcount: dict[str, int] = {}
+        for r in rows:
+            imgs = store.get_images(con, r["id"]) if r["n_attachments"] else []
+            messages.append({
+                "id": r["id"],
+                "ts": r["ts"],
+                "time": _dt.datetime.fromtimestamp(r["ts"]).strftime("%H:%M"),
+                "sender": r["sender_name"],
+                "type": r["type"],
+                "text": display_text(r["type"], r["text"], _msg_raw(con, r["id"])),
+                "images": [{"message_id": r["id"], "src_ref": im["src_ref"],
+                            "local_path": im["local_path"]} for im in imgs],
+            })
+            pcount[r["sender_name"]] = pcount.get(r["sender_name"], 0) + 1
+        if after_message_id is not None:
+            stamp = str(after_message_id)
+        else:
+            stamp = _dt.datetime.fromtimestamp(since).strftime("%Y-%m-%d")
+        bundle = {
+            "group": {"wxid": wxid, "name": name},
+            "message_count": len(messages),
+            "participants": [{"name": k, "message_count": v}
+                             for k, v in sorted(pcount.items(), key=lambda x: -x[1])],
+            "messages": messages,
+            "after_message_id": after_message_id,
+            "since": since,
+            "until": until,
+        }
+        d = bundle_dir(name, f"since-{stamp}")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "messages.json").write_text(
+            json.dumps(bundle, ensure_ascii=False, indent=2))
+        bundle["_bundle_dir"] = str(d)
+        return bundle
+    finally:
+        con.close()
+
+
 def _msg_raw(con, message_id: int) -> str | None:
     r = con.execute("SELECT raw FROM messages WHERE id=?", (message_id,)).fetchone()
     return r["raw"] if r else None

@@ -99,6 +99,49 @@ class CursorTests(unittest.TestCase):
         all_rows = app.list_cursors()
         self.assertEqual(len(all_rows), 2)
 
+    def test_export_after_excludes_cursor_message(self):
+        bundle = app.export_after("富德系统支持", after_message_id=self.msg_a1)
+        ids = [m["id"] for m in bundle["messages"]]
+        self.assertEqual(ids, [self.msg_a2, self.msg_a3])
+        self.assertEqual(bundle["after_message_id"], self.msg_a1)
+        self.assertTrue(
+            (config.OUT_DIR / "富德系统支持" / f"since-{self.msg_a1}" / "messages.json").is_file()
+        )
+
+    def test_export_after_after_id_wins_over_since(self):
+        # since is before msg_a1; after_message_id is msg_a1 → must start at a2
+        bundle = app.export_after(
+            "富德系统支持", after_message_id=self.msg_a1, since=1_700_000_000
+        )
+        self.assertEqual([m["id"] for m in bundle["messages"]], [self.msg_a2, self.msg_a3])
+
+    def test_export_after_since_and_until(self):
+        bundle = app.export_after(
+            "富德系统支持", since=1_724_000_100, until=1_724_000_200
+        )
+        self.assertEqual([m["id"] for m in bundle["messages"]], [self.msg_a2])
+        day = __import__("datetime").datetime.fromtimestamp(1_724_000_100).strftime("%Y-%m-%d")
+        self.assertTrue(
+            (config.OUT_DIR / "富德系统支持" / f"since-{day}" / "messages.json").is_file()
+        )
+
+    def test_export_after_requires_bound(self):
+        with self.assertRaises(ValueError):
+            app.export_after("富德系统支持")
+
+    def test_export_after_missing_after_id(self):
+        with self.assertRaises(ValueError):
+            app.export_after("富德系统支持", after_message_id=999999)
+
+    def test_export_after_empty_does_not_change_cursor(self):
+        app.save_cursor("富德系统支持", "需求分析", self.msg_a3)
+        before = app.get_cursor("富德系统支持", "需求分析")
+        bundle = app.export_after("富德系统支持", after_message_id=self.msg_a3)
+        self.assertEqual(bundle["message_count"], 0)
+        after = app.get_cursor("富德系统支持", "需求分析")
+        self.assertEqual(before["last_message_id"], after["last_message_id"])
+        self.assertEqual(before["updated_at"], after["updated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

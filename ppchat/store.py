@@ -145,7 +145,8 @@ def get_contacts(con) -> list[dict]:
 
 
 def get_messages(con, chat_wxid: str, since: int | None = None, until: int | None = None,
-                 limit: int = 500, offset: int = 0) -> list[dict]:
+                 limit: int = 500, offset: int = 0,
+                 after_sort_seq: int | None = None) -> list[dict]:
     sql = (
         "SELECT m.id, m.ts, m.sort_seq, m.type, m.local_type, m.sender_wxid, "
         "COALESCE(c.remark, c.display_name, m.sender_wxid) AS sender_name, "
@@ -157,6 +158,8 @@ def get_messages(con, chat_wxid: str, since: int | None = None, until: int | Non
         "WHERE ch.wxid=?"
     )
     args: list = [chat_wxid]
+    if after_sort_seq is not None:
+        sql += " AND m.sort_seq>?"; args.append(after_sort_seq)
     if since is not None:
         sql += " AND m.ts>=?"; args.append(since)
     if until is not None:
