@@ -124,6 +124,30 @@ EXTRACT_APP = _profile.get("EXTRACT_APP")
 EXTRACT_BIN = _profile.get("EXTRACT_BIN")
 
 
+def bootstrap_home(
+    home: Path | None = None, db_root: Path | str | None = None
+) -> dict:
+    """Create ~/.ppchat (or ``home``) and write config.json once if db_root is set.
+
+    Does not overwrite an existing config.json. Keys / store files are only
+    path handles here — they are created later by key capture and ingest.
+    """
+    dest = Path(home) if home is not None else PPCHAT_HOME
+    dest.mkdir(parents=True, exist_ok=True)
+    cfg = dest / "config.json"
+    root = Path(db_root) if db_root is not None else None
+    if root is not None and not cfg.exists():
+        cfg.write_text(json.dumps({"db_root": str(root)}, indent=2) + "\n", encoding="utf-8")
+    return {
+        "home": dest,
+        "config": cfg,
+        "keys_json": dest / "keys.json",
+        "store_db": dest / "ppchat.db",
+        "candidates_windows": dest / "candidates_windows.json",
+        "db_root": root,
+    }
+
+
 def account_dirs() -> list[Path]:
     """Return per-account data dirs (dirs that contain a db_storage folder)."""
     # REAL-MACHINE-VERIFY: Windows 4.0 is CONTAINER/<account>/db_storage (same as mac).

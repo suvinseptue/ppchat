@@ -5,6 +5,7 @@ All tests use mocks / synthetic bytes — no Windows API or live WeChat.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -215,6 +216,36 @@ class WeChat4WindowsProviderTests(unittest.TestCase):
         self.assertEqual(result, {"chats": 2})
         self.assertEqual(fake_ingest.called["chat_wxid"], "wxid_win")
         self.assertEqual(fake_ingest.called["account_dir"], Path("C:/acct"))
+
+
+class BootstrapHomeTests(unittest.TestCase):
+    def test_creates_home_and_writes_config_once(self):
+        from ppchat import config
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / ".ppchat"
+            root = Path(td) / "xwechat_files"
+            info = config.bootstrap_home(home=home, db_root=root)
+            self.assertTrue(home.is_dir())
+            self.assertEqual(info["home"], home)
+            self.assertEqual(info["keys_json"], home / "keys.json")
+            self.assertEqual(info["store_db"], home / "ppchat.db")
+            self.assertEqual(info["candidates_windows"], home / "candidates_windows.json")
+            self.assertEqual(info["config"], home / "config.json")
+            self.assertEqual(json.loads(info["config"].read_text())["db_root"], str(root))
+
+            info["config"].write_text('{"db_root": "keep-me"}', encoding="utf-8")
+            again = config.bootstrap_home(home=home, db_root=Path(td) / "other")
+            self.assertEqual(json.loads(again["config"].read_text())["db_root"], "keep-me")
+
+    def test_skips_config_when_db_root_missing(self):
+        from ppchat import config
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / ".ppchat"
+            info = config.bootstrap_home(home=home, db_root=None)
+            self.assertTrue(home.is_dir())
+            self.assertFalse(info["config"].exists())
 
 
 if __name__ == "__main__":
