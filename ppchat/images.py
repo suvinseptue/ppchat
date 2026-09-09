@@ -272,3 +272,45 @@ def extract_and_update_attachment(
             (str(exc), attachment_id),
         )
         return {"local_path": None, "sha256": None, "format": None, "error": str(exc)}
+
+
+def recover_plaintext_from_temp(
+    account_dir: Path,
+    *,
+    img_file_name: str | None = None,
+    file_size: int | None = None,
+    chat_md5: str | None = None,
+) -> Path | None:
+    """Find a already-decoded PNG/JPEG left by WeChat (no V2 key needed).
+
+    macOS 4.x writes plaintext copies when the user *sends* a shot
+    (``temp/InputTemp/<img_file_name>``) or *opens* a received image
+    (``temp/RWTemp/<YYYY-MM>/<chat_md5>/*.png``, matched by exact size).
+    """
+    account_dir = Path(account_dir)
+    temp = account_dir / "temp"
+    if img_file_name:
+        sent = temp / "InputTemp" / img_file_name
+        if sent.is_file() and detect_image_format(sent.read_bytes()[:16]) != "bin":
+            return sent
+    if file_size is None or file_size <= 0:
+        return None
+    roots = [temp / "RWTemp"]
+    if chat_md5:
+        roots.insert(0, temp / "RWTemp" / chat_md5)
+        # also year-month folders: RWTemp/2026-08/<chat_md5>
+        for month in (temp / "RWTemp").glob("20*"):
+            roots.insert(0, month / chat_md5)
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for p in root.rglob("*"):
+            if not p.is_file() or p.stat().st_size != file_size:
+                continue
+            try:
+                head = p.read_bytes()[:16]
+            except OSError:
+                continue
+            if detect_image_format(head) != "bin":
+                return p
+    return None
