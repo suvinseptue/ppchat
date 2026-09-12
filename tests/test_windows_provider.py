@@ -315,5 +315,15 @@ class BootstrapHomeTests(unittest.TestCase):
             self.assertFalse(info["config"].exists())
 
 
+class WindowsCmdWrappersAreAsciiTests(unittest.TestCase):
+    def test_cmd_wrappers_are_ascii(self):
+        # cmd.exe on Chinese Windows reads .cmd as CP936. UTF-8 Chinese
+        # swallows following ASCII (e.g. -ExecutionPolicy → 'cutionPolicy).
+        root = Path(__file__).resolve().parent.parent
+        for name in ("install.cmd", "setup-keys.cmd", "ppchat.cmd"):
+            data = (root / name).read_bytes()
+            self.assertTrue(data.isascii(), f"{name} must be ASCII-only")
+
+
 if __name__ == "__main__":
     unittest.main()
