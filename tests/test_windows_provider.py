@@ -55,6 +55,73 @@ class ScanBufferForLiteralsTests(unittest.TestCase):
         self.assertEqual(self.mod.scan_buffer_for_literals(buf), [good])
 
 
+class ScanBufferForWindowsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = _load_find_keys_windows()
+
+    def test_captures_ctx_around_salt_hit(self):
+        salt = bytes(range(16))
+        prefix = b"A" * 10
+        suffix = b"B" * 10
+        buf = prefix + salt + suffix
+        got = self.mod.scan_buffer_for_windows(buf, [salt])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["salt"], salt.hex())
+        self.assertEqual(bytes.fromhex(got[0]["ctx"]), buf)
+
+    def test_clips_to_window_radius(self):
+        salt = b"\xab" * 16
+        left = b"L" * 3000
+        right = b"R" * 3000
+        buf = left + salt + right
+        got = self.mod.scan_buffer_for_windows(buf, [salt])
+        ctx = bytes.fromhex(got[0]["ctx"])
+        self.assertEqual(len(ctx), 2048 + 16 + 2048)
+        self.assertEqual(ctx[:2048], left[-2048:])
+        self.assertEqual(ctx[2048:2064], salt)
+        self.assertEqual(ctx[2064:], right[:2048])
+
+    def test_multiple_salts_and_hits_dedup_identical_ctx(self):
+        s1 = b"\x11" * 16
+        s2 = b"\x22" * 16
+        # Small buf: both s1 hits clip to the same full-buffer ctx → one record.
+        small = s1 + b"xxxx" + s1 + b"yyyy" + s2
+        got = self.mod.scan_buffer_for_windows(small, [s1, s2])
+        salts = [w["salt"] for w in got]
+        self.assertEqual(salts.count(s1.hex()), 1)
+        self.assertEqual(salts.count(s2.hex()), 1)
+        # Far-apart hits get distinct windows.
+        far = (b"L" * 3000) + s1 + (b"M" * 3000) + s1 + (b"R" * 3000)
+        self.assertEqual(len(self.mod.scan_buffer_for_windows(far, [s1])), 2)
+        self.assertEqual(self.mod.scan_buffer_for_windows(b"hello", [b"\x00" * 16]), [])
+
+    def test_salts_from_db_files_reads_first_16_unique(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            a = root / "a.db"
+            b = root / "b.db"
+            c = root / "c.db"
+            short = root / "short.db"
+            a.write_bytes(bytes(range(16)) + b"rest")
+            b.write_bytes(bytes(range(16, 32)) + b"rest")
+            c.write_bytes(bytes(range(16)) + b"dup-salt")
+            short.write_bytes(b"too-short")
+            salts = self.mod.salts_from_db_files([a, b, c, short])
+        self.assertEqual(salts, [bytes(range(16)), bytes(range(16, 32))])
+
+    def test_write_candidates_includes_windows(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "candidates_windows.json"
+            windows = [{"salt": "aa" * 16, "ctx": "bb" * 8}]
+            self.mod.write_candidates([], path=dest, windows=windows)
+            data = json.loads(dest.read_text())
+        self.assertEqual(data["windows"], windows)
+        self.assertEqual(data["literals"], [])
+        self.assertEqual(data["keys"], [])
+        self.assertEqual(data["pairs"], [])
+
+
 class WindowsConfigProfileTests(unittest.TestCase):
     def test_select_profile_win32_uses_windows_container(self):
         from ppchat import config

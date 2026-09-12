@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Scan Weixin.exe memory for WeChat 4.0 SQLCipher key literals (Windows).
+"""Scan Weixin.exe memory for WeChat 4.x SQLCipher key material (Windows).
 
-WeChat 4.0 caches each DB key as the ASCII literal ``x'<96hex>'``
-(64 hex enc_key + 32 hex salt). This scanner walks committed readable
-regions of ``Weixin.exe`` and writes candidates that ``keys.load_candidates``
-/ ``tools/build_keymap.py`` already understand.
+Two complementary methods in one pass (same as ``find_keys_macos.c``):
+
+  (A) literal scan : ``x'<64hex enc_key><32hex salt>'``
+  (B) salt-anchored: each DB's first 16 bytes (file salt) is searched in
+      memory; a ±2 KiB window around each hit is dumped. The enc key lives
+      in the same WCDB codec struct, so ``keys.build_key_map`` can slide a
+      32-byte candidate across the window and HMAC-verify.
 
 Usage (Administrator, Weixin.exe logged in)::
 
@@ -12,12 +15,13 @@ Usage (Administrator, Weixin.exe logged in)::
     python tools/build_keymap.py ~/.ppchat/candidates_windows.json
 
 Requirements:
-    - Windows + WeChat 4.0 (process name Weixin.exe, not WeChat.exe / 3.x)
+    - Windows + WeChat 4.x (process name Weixin.exe, not WeChat.exe / 3.x)
     - Run the Python process as Administrator (PROCESS_VM_READ)
     - Weixin.exe must be running and logged in
+    - ``db_root`` must point at ``xwechat_files`` so salts can be loaded
 
 Output: ``~/.ppchat/candidates_windows.json``
-    ``{"windows":[], "literals":[...], "keys":[], "pairs":[]}``
+    ``{"windows":[{"salt","ctx"},...], "literals":[...], "keys":[], "pairs":[]}``
 
 No third-party deps. ctypes/kernel32 stay inside ``main()`` /
 ``_iter_process_memory()`` so this module imports on macOS for unit tests.
@@ -30,8 +34,11 @@ import sys
 from pathlib import Path
 
 # x'<64–192 hex>' — primary form is 96 hex; loose range matches nearby variants.
-# REAL-MACHINE-VERIFY: WeChat 4.1+ may stop caching plaintext x'<96hex>' (phase 7).
+# 4.1+ often drops the plaintext literal; salt-anchored windows are the fallback.
 _LIT_RE = re.compile(rb"x'([0-9a-fA-F]{64,192})'")
+WINDOW = 2048
+SALT_LEN = 16
+OVERLAP = 2 * WINDOW
 
 PROCESS_NAME = "Weixin.exe"
 CANDIDATES_NAME = "candidates_windows.json"
@@ -55,6 +62,60 @@ def scan_buffer_for_literals(buf: bytes) -> list[str]:
     return out
 
 
+def scan_buffer_for_windows(buf: bytes, salts: list[bytes]) -> list[dict]:
+    """Return ``{salt, ctx}`` hex dicts for each salt hit in ``buf``.
+
+    ``ctx`` is the clipped ±WINDOW bytes around the 16-byte salt, matching
+    ``find_keys_macos.c``. Identical ``(salt, ctx)`` pairs are dropped.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for salt in salts:
+        if len(salt) != SALT_LEN:
+            continue
+        start = 0
+        while True:
+            pos = buf.find(salt, start)
+            if pos < 0:
+                break
+            lo = pos - WINDOW if pos > WINDOW else 0
+            hi = pos + SALT_LEN + WINDOW
+            if hi > len(buf):
+                hi = len(buf)
+            rec = {"salt": salt.hex(), "ctx": buf[lo:hi].hex()}
+            key = (rec["salt"], rec["ctx"])
+            if key not in seen:
+                seen.add(key)
+                out.append(rec)
+            start = pos + SALT_LEN
+    return out
+
+
+def salts_from_db_files(paths: list[Path]) -> list[bytes]:
+    """First 16 bytes of each ``.db``, unique, skip short/unreadable files."""
+    seen: set[bytes] = set()
+    out: list[bytes] = []
+    for path in paths:
+        try:
+            blob = Path(path).read_bytes()[:SALT_LEN]
+        except OSError:
+            continue
+        if len(blob) != SALT_LEN or blob in seen:
+            continue
+        seen.add(blob)
+        out.append(blob)
+    return out
+
+
+def _load_account_salts() -> list[bytes]:
+    try:
+        from ppchat import config
+
+        return salts_from_db_files(config.db_files())
+    except (ImportError, FileNotFoundError, OSError):
+        return []
+
+
 def _candidates_output_path() -> Path:
     try:
         from ppchat import config
@@ -64,12 +125,21 @@ def _candidates_output_path() -> Path:
         return Path.home() / ".ppchat" / CANDIDATES_NAME
 
 
-def write_candidates(literals: list[str], path: Path | None = None) -> Path:
+def write_candidates(
+    literals: list[str],
+    path: Path | None = None,
+    windows: list[dict] | None = None,
+) -> Path:
     dest = path or _candidates_output_path()
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(
         json.dumps(
-            {"windows": [], "literals": literals, "keys": [], "pairs": []},
+            {
+                "windows": windows or [],
+                "literals": literals,
+                "keys": [],
+                "pairs": [],
+            },
             indent=2,
         )
         + "\n"
@@ -246,9 +316,17 @@ def _iter_process_memory(pid: int):
                         n,
                         ctypes.byref(read),
                     )
-                    if ok and read.value:
-                        yield bytes(buf[: read.value])
-                    offset += n
+                    got = int(read.value) if ok else 0
+                    if got:
+                        yield bytes(buf[:got])
+                    # Keep 2*WINDOW overlap so a salt on an 8 MiB boundary
+                    # still has a full ctx in some chunk (same as find_keys_macos).
+                    if got > OVERLAP:
+                        offset += got - OVERLAP
+                    elif got:
+                        offset += got
+                    else:
+                        offset += n
             nxt = base + size
             if nxt <= addr:
                 break
@@ -263,18 +341,31 @@ def main() -> int:
         return 2
     pid = _find_weixin_pid()
     print(f"[*] scanning {PROCESS_NAME} pid={pid}", file=sys.stderr)
-    seen: set[str] = set()
+    salts = _load_account_salts()
+    print(f"[*] loaded {len(salts)} salt(s) from db files", file=sys.stderr)
+    seen_lit: set[str] = set()
     literals: list[str] = []
+    seen_win: set[tuple[str, str]] = set()
+    windows: list[dict] = []
     for chunk in _iter_process_memory(pid):
         for lit in scan_buffer_for_literals(chunk):
-            if lit not in seen:
-                seen.add(lit)
+            if lit not in seen_lit:
+                seen_lit.add(lit)
                 literals.append(lit)
-    dest = write_candidates(literals)
-    print(f"[*] {len(literals)} literal(s) -> {dest}", file=sys.stderr)
-    if not literals:
+        for rec in scan_buffer_for_windows(chunk, salts):
+            key = (rec["salt"], rec["ctx"])
+            if key not in seen_win:
+                seen_win.add(key)
+                windows.append(rec)
+    dest = write_candidates(literals, windows=windows)
+    print(
+        f"[*] {len(literals)} literal(s), {len(windows)} window(s) -> {dest}",
+        file=sys.stderr,
+    )
+    if not literals and not windows:
         print(
-            "[!] no x'<hex>' literals; WeChat 4.1+ may not cache plaintext keys",
+            "[!] no x'<hex>' literals and no salt windows; "
+            "check db_root, login, and that AV is not blocking ReadProcessMemory",
             file=sys.stderr,
         )
         return 1

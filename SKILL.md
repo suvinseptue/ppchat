@@ -43,7 +43,7 @@ python tools/find_keys_windows.py
 python tools/build_keymap.py %USERPROFILE%\.ppchat\candidates_windows.json
 ```
 
-数据目录默认 `%USERPROFILE%\Documents\xwechat_files`；也可在 `%USERPROFILE%\.ppchat\config.json` 写 `"db_root"` 覆盖。杀软 / EDR 可能拦截 `ReadProcessMemory`；若扫不到 `x'<96hex>'` 字面量（部分 4.1+），本期无断点兜底。
+数据目录默认 `%USERPROFILE%\Documents\xwechat_files`；也可在 `%USERPROFILE%\.ppchat\config.json` 写 `"db_root"` 覆盖。杀软 / EDR 可能拦截 `ReadProcessMemory`。4.1+ 若不再缓存 `x'<96hex>'` 字面量，扫描器会改用各库文件头 salt 在内存里抓 ±2KiB 窗口，再 HMAC 校验。
 
 ## 日常流程（无需 sudo）
 

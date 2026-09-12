@@ -62,7 +62,7 @@ python3 -m venv .venv
 1. 打开并登录微信 **4.0**（任务管理器里应是 `Weixin.exe`）。
 2. 右键 **`setup-keys.cmd`** → 以管理员身份运行。
 
-杀软可能拦截读进程内存；扫不到时把仓库和 `.venv\Scripts\python.exe` 加入排除。部分 4.1+ 不再明文缓存密钥，本期没有兜底。
+杀软可能拦截读进程内存；扫不到时把仓库和 `.venv\Scripts\python.exe` 加入排除。4.1+ 不再明文缓存 `x'<hex>'` 时，扫描器会用各库文件头 salt 抓内存窗口再 HMAC 校验。
 
 ### macOS
 

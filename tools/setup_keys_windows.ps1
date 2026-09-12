@@ -42,7 +42,7 @@ Write-Host "[*] Weixin.exe pid=$(( $weixin | Sort-Object WorkingSet64 -Descendin
 Write-Host "[1/2] 扫描进程内存 -> %USERPROFILE%\.ppchat\candidates_windows.json"
 & $VenvPy $FindKeys
 if ($LASTEXITCODE -ne 0) {
-    Fail "没有扫到密钥。请确认：管理员、微信已登录、杀软未拦截 ReadProcessMemory。部分 4.1+ 不再明文缓存密钥。"
+    Fail "没有扫到密钥。请确认：管理员、微信已登录、杀软未拦截 ReadProcessMemory、config.json 的 db_root 指向 xwechat_files。4.1+ 不再明文缓存 x'<hex>' 时依赖 salt-window。"
 }
 
 $cand = Join-Path $env:USERPROFILE ".ppchat\candidates_windows.json"
