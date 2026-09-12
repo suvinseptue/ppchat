@@ -15,9 +15,11 @@
 
 ## 安装
 
+不走 git 时：从 [Releases](https://github.com/suvinseptue/ppchat/releases/latest) 下载 `ppchat-*.zip`，解压后进入目录，再按下面做。
+
 ### Windows（一键）
 
-1. 把本仓库拷到 Windows（`git clone` 或解压均可）。
+1. 把本仓库拷到 Windows（下载 zip、`git clone` 或解压均可）。
 2. 双击根目录 **`install.cmd`**。
 
 脚本会：没有 Python 3.10+ 就装 3.12、创建 `.venv`、安装 `requirements.txt`、建立 `%USERPROFILE%\.ppchat` 并写入 `config.json`。
