@@ -149,34 +149,42 @@ class WindowsConfigProfileTests(unittest.TestCase):
             / "Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files",
         )
 
-    def test_discover_prefers_config_json_db_root(self):
+    def test_discover_prefers_config_json_when_it_has_accounts(self):
         from ppchat import config
 
-        explicit = Path("D:/custom/xwechat_files")
-        with patch("ppchat.config._read_db_root_from_config", return_value=explicit), patch(
-            "ppchat.config._read_filesave_path_from_registry",
-            return_value=Path("E:/reg"),
-        ):
-            self.assertEqual(config._discover_windows_db_root(), explicit)
+        with tempfile.TemporaryDirectory() as td:
+            explicit = Path(td) / "custom" / "xwechat_files"
+            (explicit / "acct" / "db_storage").mkdir(parents=True)
+            other = Path(td) / "xwechat_files"
+            (other / "acct" / "db_storage").mkdir(parents=True)
+            with patch("ppchat.config._read_db_root_from_config", return_value=explicit), patch(
+                "ppchat.config._read_filesave_path_from_registry",
+                return_value=Path("E:/reg"),
+            ), patch.dict(os.environ, {"USERPROFILE": td}):
+                self.assertEqual(config._discover_windows_db_root(), explicit)
 
-    def test_discover_uses_registry_then_userprofile(self):
+    def test_discover_skips_empty_config_and_uses_profile_xwechat_files(self):
         from ppchat import config
 
-        reg = Path("E:/WeChat Files")
-        with patch("ppchat.config._read_db_root_from_config", return_value=None), patch(
-            "ppchat.config._read_filesave_path_from_registry", return_value=reg
-        ):
-            self.assertEqual(
-                config._discover_windows_db_root(),
-                config._normalize_windows_container(reg),
-            )
+        with tempfile.TemporaryDirectory() as td:
+            stale = Path(td) / "Documents" / "xwechat_files"
+            stale.mkdir(parents=True)
+            real = Path(td) / "xwechat_files"
+            (real / "acct" / "db_storage").mkdir(parents=True)
+            with patch("ppchat.config._read_db_root_from_config", return_value=stale), patch(
+                "ppchat.config._read_filesave_path_from_registry", return_value=None
+            ), patch.dict(os.environ, {"USERPROFILE": td}):
+                self.assertEqual(config._discover_windows_db_root(), real)
+
+    def test_discover_default_is_profile_xwechat_files(self):
+        from ppchat import config
 
         with patch("ppchat.config._read_db_root_from_config", return_value=None), patch(
             "ppchat.config._read_filesave_path_from_registry", return_value=None
         ), patch.dict(os.environ, {"USERPROFILE": r"C:\Users\alice"}):
             self.assertEqual(
                 config._discover_windows_db_root(),
-                Path(r"C:\Users\alice") / "Documents" / "xwechat_files",
+                Path(r"C:\Users\alice") / "xwechat_files",
             )
 
     def test_normalize_appends_xwechat_files_unless_already(self):

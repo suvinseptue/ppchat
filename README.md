@@ -136,4 +136,4 @@ bash tools/get_keys.sh cleanup
 默认微信数据目录：
 
 - macOS：`~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files`
-- Windows：`%USERPROFILE%\Documents\xwechat_files`（也可从注册表或 `config.json` 覆盖）
+- Windows：`%USERPROFILE%\xwechat_files`（4.x 默认；也可从 `Documents\xwechat_files`、注册表或 `config.json` 覆盖）

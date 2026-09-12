@@ -25,7 +25,7 @@
 | 仓库 `.venv\` | Python 虚拟环境 |
 | 仓库 `out\` | 导出的分析包 |
 
-`db_root` 默认按这个顺序找：`config.json` → 注册表 `HKCU\Software\Tencent\WeChat\FileSavePath` → `%USERPROFILE%\Documents\xwechat_files`。
+`db_root` 默认按这个顺序找第一个已有 `<账号>/db_storage` 的目录：`config.json` → `%USERPROFILE%\xwechat_files`（4.x 默认）→ `%USERPROFILE%\Documents\xwechat_files` → 注册表 `HKCU\Software\Tencent\WeChat\FileSavePath`。
 
 如果打印了「db_root 还不存在」，用记事本改 `config.json`：
 

@@ -110,10 +110,30 @@ def salts_from_db_files(paths: list[Path]) -> list[bytes]:
 def _load_account_salts() -> list[bytes]:
     try:
         from ppchat import config
-
-        return salts_from_db_files(config.db_files())
-    except (ImportError, FileNotFoundError, OSError):
+    except ImportError:
+        print("[!] ppchat.config not importable", file=sys.stderr)
         return []
+    print(f"[*] db_root={config.CONTAINER}", file=sys.stderr)
+    try:
+        dbs: list[Path] = []
+        for acct in config.account_dirs():
+            dbs.extend(config.db_files(acct))
+    except (FileNotFoundError, OSError) as e:
+        print(f"[!] cannot list db files: {e}", file=sys.stderr)
+        return []
+    print(
+        f"[*] {len(config.account_dirs())} account(s), {len(dbs)} db file(s)",
+        file=sys.stderr,
+    )
+    if not dbs:
+        print(
+            "[!] no <account>/db_storage/*.db under db_root; "
+            "edit %USERPROFILE%\\.ppchat\\config.json db_root "
+            "to the folder that contains xwechat_files accounts",
+            file=sys.stderr,
+        )
+        return []
+    return salts_from_db_files(dbs)
 
 
 def _candidates_output_path() -> Path:

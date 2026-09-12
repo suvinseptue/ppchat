@@ -77,20 +77,67 @@ def _normalize_windows_container(path: Path) -> Path:
     return path / "xwechat_files"
 
 
-def _default_windows_xwechat_files() -> Path:
+def _windows_userprofile() -> Path:
     root = os.environ.get("USERPROFILE")
-    base = Path(root) if root else Path.home()
-    return base / "Documents" / "xwechat_files"
+    return Path(root) if root else Path.home()
+
+
+def _default_windows_xwechat_files() -> Path:
+    # WeChat 4.x default is %USERPROFILE%\xwechat_files (not Documents\).
+    return _windows_userprofile() / "xwechat_files"
+
+
+def _has_account_db_storage(root: Path) -> bool:
+    """True if root/<account>/db_storage exists."""
+    try:
+        if not root.is_dir():
+            return False
+        for child in root.iterdir():
+            if child.is_dir() and (child / "db_storage").is_dir():
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _windows_db_root_candidates() -> list[Path]:
+    """Possible xwechat_files roots. First one with an account wins at discover."""
+    home = _windows_userprofile()
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path | None) -> None:
+        if path is None:
+            return
+        key = str(path).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(path)
+
+    add(_read_db_root_from_config())
+    add(home / "xwechat_files")
+    add(home / "Documents" / "xwechat_files")
+    reg = _read_filesave_path_from_registry()
+    if reg:
+        add(_normalize_windows_container(reg))
+    return out
 
 
 def _discover_windows_db_root() -> Path:
-    """Resolve CONTAINER: config.json db_root → registry → Documents\\xwechat_files."""
+    """Resolve CONTAINER: first candidate that already has <account>/db_storage.
+
+    Order: config.json → %USERPROFILE%\\xwechat_files → Documents\\xwechat_files
+    → registry FileSavePath. If none have an account yet, keep config.json or
+    the 4.x profile default so bootstrap can write it.
+    """
+    cands = _windows_db_root_candidates()
+    for path in cands:
+        if _has_account_db_storage(path):
+            return path
     explicit = _read_db_root_from_config()
     if explicit:
         return explicit
-    reg = _read_filesave_path_from_registry()
-    if reg:
-        return _normalize_windows_container(reg)
     return _default_windows_xwechat_files()
 
 
