@@ -6,8 +6,8 @@
 
 ## 第 1 步：一键安装环境
 
-1. 把本仓库拷到 Windows（`git clone` 或解压均可）。
-2. 双击仓库根目录的 `install.cmd`。
+1. 把本仓库拷到 Windows（`git clone` 或**先解压** zip 到普通文件夹，例如 `D:\ppchat`）。不要在压缩包窗口里直接双击 `install.cmd`。
+2. 双击解压后的 `install.cmd`（不要用管理员；抓密钥才用 `setup-keys.cmd` 的管理员）。
 
 脚本会自动：
 

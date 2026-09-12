@@ -19,8 +19,8 @@
 
 ### Windows（一键）
 
-1. 把本仓库拷到 Windows（下载 zip、`git clone` 或解压均可）。
-2. 双击根目录 **`install.cmd`**。
+1. 下载 zip 后**先解压到普通文件夹**（例如 `D:\ppchat`）。不要在压缩包窗口里直接打开，否则会落到 Temp，找不到 `tools\install_windows.ps1`。
+2. 双击解压后的 **`install.cmd`**。这一步**不要**“以管理员身份运行”。
 
 脚本会：没有 Python 3.10+ 就装 3.12、创建 `.venv`、安装 `requirements.txt`、建立 `%USERPROFILE%\.ppchat` 并写入 `config.json`。
 
